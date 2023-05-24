@@ -4,8 +4,12 @@ use std::fs;
 use std::fs::File;
 use std::path::Path;
 
-use rand::seq::SliceRandom;
 use rusqlite::{params, Connection, Result, named_params};
+
+enum RandomState {
+    FullShuffle,
+    MinUses
+}
 
 fn main() -> Result<()> {
     let db_path = "/home/schelcc/.wallpapers/backgrounds.db";
@@ -15,52 +19,44 @@ fn main() -> Result<()> {
 
     refresh_background_db(&db, &bg_path)?;
 
-    // match select_true_random(&db) {
+    // match select_random(&db, RandomState::FullShuffle) {
     //     Err(_) => (),
     //     Ok(res) => println!("Selected: {}", res)
     // };
 
+    select_set_update(&db, RandomState::MinUses);
+
     Ok(())
 }
 
-fn select_true_random(db:&Connection) -> Result<String, ()> {
-    let mut stmt = match db.prepare("SELECT backgrounds.path FROM backgrounds") {
-        Err(why) => {
-            println!("[ERR] Selection statement preparation: {:?}", why);
-            return Err(())
+fn select_set_update(db:&Connection, rand:RandomState) -> () {
+    let path = match select_random(&db, rand) {
+        Err(_) => String::from("/home/schelcc/.wallpapers/default_bg.jpg"),
+        Ok(path) => path
+    };
+
+    wallpaper::set_from_path(&path).unwrap();
+
+    db.execute("UPDATE backgrounds SET uses = uses + 1 WHERE path = ?1", params![&path]);
+}
+
+fn select_random(db:&Connection, rand:RandomState) -> Result<String, rusqlite::Error> {
+    let mut stmt = match &rand {
+        RandomState::FullShuffle => {
+            db.prepare("SELECT backgrounds.path FROM backgrounds ORDER BY RANDOM() LIMIT 1")
+                .expect("[ERR] Random selection err")
         },
-        Ok(res) => res
+        RandomState::MinUses => {
+            db.prepare("SELECT backgrounds.path FROM backgrounds 
+                            WHERE backgrounds.uses = (SELECT min(backgrounds.uses) 
+                            FROM backgrounds) ORDER BY RANDOM() LIMIT 1")
+                .expect("[ERR] Random selection err")
+        }
     };
 
-    let results = match stmt.query_map([], |r| r.get::<usize, String>(0)) {
-        Err(why) => {
-            println!("[ERR] Query map: {:?}", why);
-            return Err(())
-        },
-        Ok(res) => res
-    };
+    let mut results = stmt.query_map([], |r| r.get::<usize, String>(0))?;
 
-    let mut selection_vec : Vec<String> = Vec::new();
-
-    for res in results {
-        selection_vec.push(match res {
-            Err(why) => {
-                println!("[ERR] Vector construction: {:?}", why);
-                return Err(())
-            },
-            Ok(res) => res
-        });
-    };
-
-    let selection : String = match selection_vec.choose(&mut rand::thread_rng()) {
-        None => {
-            println!("[ERR] Random selection: No result from random selection");
-            return Err(())
-        },
-        Some(sel) => sel.to_string()
-    };
-
-    Ok(selection)
+    results.nth(0).unwrap()
 }
 
 
