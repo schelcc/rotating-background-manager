@@ -1,10 +1,8 @@
 // mod img_tools;
 
 use std::fs;
-use std::fs::File;
-use std::path::Path;
 
-use rusqlite::{params, Connection, Result, named_params};
+use rusqlite::{params, Connection, Result};
 
 enum RandomState {
     FullShuffle,
@@ -15,14 +13,10 @@ fn main() -> Result<()> {
     let db_path = "/home/schelcc/.wallpapers/backgrounds.db";
     let bg_path = "/home/schelcc/.wallpapers/unsorted/";
 
-    let db = Connection::open(db_path)?;
+    let db = Connection::open(&db_path)?;
 
+    // For now, setting up to be used as one-time execution
     refresh_background_db(&db, &bg_path)?;
-
-    // match select_random(&db, RandomState::FullShuffle) {
-    //     Err(_) => (),
-    //     Ok(res) => println!("Selected: {}", res)
-    // };
 
     select_set_update(&db, RandomState::MinUses);
 
@@ -37,7 +31,10 @@ fn select_set_update(db:&Connection, rand:RandomState) -> () {
 
     wallpaper::set_from_path(&path).unwrap();
 
-    db.execute("UPDATE backgrounds SET uses = uses + 1 WHERE path = ?1", params![&path]);
+    match db.execute("UPDATE backgrounds SET uses = uses + 1 WHERE path = ?1", params![&path]) {
+        Err(why) => println!("[ERR] Update error: {:?}", why),
+        Ok(_) => ()
+    }
 }
 
 fn select_random(db:&Connection, rand:RandomState) -> Result<String, rusqlite::Error> {
